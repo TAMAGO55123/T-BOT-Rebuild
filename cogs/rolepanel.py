@@ -196,7 +196,8 @@ async def create_role_panel(interaction:discord.Interaction, bot:Bot, file:File,
         {
             "roles": [i.id for i in roles],
             "title": title,
-            "description": des
+            "description": des,
+            "channel_id": interaction.channel.id
         }
     )
     await interaction.edit_original_response(content="作成しました。")
@@ -221,6 +222,36 @@ class RoleCog(commands.Cog):
             guild_id, message_id = tuple(gm_id.split("_"))
             guild = self.bot.get_guild(int(guild_id))
             if guild:
+                channel = (
+                    guild.get_channel(datas["channel_id"])
+                    if datas.get("channel_id") is not None
+                    else None
+                )
+                message = None
+                message_missing = False
+                message_check_failed = False
+                if channel and hasattr(channel, "fetch_message"):
+                    try:
+                        message = await channel.fetch_message(int(message_id))
+                    except discord.NotFound:
+                        message_missing = True
+                    except (discord.Forbidden, discord.HTTPException) as error:
+                        message_check_failed = True
+                        self.log.error(f"メッセージを確認できませんでした: {gm_id}", exc_info=error)
+                if message is None and not channel:
+                    for candidate in guild.text_channels:
+                        try:
+                            message = await candidate.fetch_message(int(message_id))
+                            break
+                        except discord.NotFound:
+                            continue
+                        except (discord.Forbidden, discord.HTTPException):
+                            message_check_failed = True
+                            continue
+                if message is None and not message_check_failed and (message_missing or not channel):
+                    self.file.delete(gm_id)
+                    self.log.info(f"削除済みメッセージの保存データを削除しました: {gm_id}")
+                    continue
                 roles = [guild.get_role(role_id) for role_id in role_ids if guild.get_role(role_id)]
                 if roles:
                     view = MultiRolePanelView(

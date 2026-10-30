@@ -1,0 +1,49 @@
+import discord
+from discord.ext import commands
+from discord import app_commands
+from func.dc import Bot
+from func.log import get_log
+import asyncio
+from func.file import File
+
+class Enquete_View(discord.ui.View):
+    def __init__(self, message:int):
+        super().__init__(timeout=None)
+        self.message_id = message
+
+    @discord.ui.Button(style=discord.ButtonStyle.green, label="投票する",)
+
+class EnqueteCog(commands.Cog):
+    def __init__(self, bot:Bot):
+        self.bot = bot
+        self.log = get_log(self.__class__.__name__)
+    @commands.Cog.listener()
+    async def on_ready(self):
+        self.log.info(f"{self.__class__.__name__}が読み込まれました！")
+        self.file = File("role.json")
+        tasks = []
+        f_d = self.file.get_all()
+        for gm_id in f_d:
+            datas = f_d[gm_id]
+            role_ids = datas["roles"]
+            title = datas["title"]
+            description = datas["description"]
+            guild_id, message_id = tuple(gm_id.split("_"))
+            guild = self.bot.get_guild(int(guild_id))
+            if guild:
+                roles = [guild.get_role(role_id) for role_id in role_ids if guild.get_role(role_id)]
+                if roles:
+                    view = MultiRolePanelView(
+                        roles,
+                        message_id,
+                        description,
+                        title
+                    )
+                    self.bot.add_view(view)
+                    print(f"ビューを再登録しました: {[role.name for role in roles]} (Guild ID: {guild_id}, Message ID: {message_id})")
+                    tasks.append(asyncio.create_task(asyncio.sleep(0)))
+        if tasks:
+            await asyncio.gather(*tasks)
+
+async def setup(bot):
+    await bot.add_cog(EnqueteCog(bot))

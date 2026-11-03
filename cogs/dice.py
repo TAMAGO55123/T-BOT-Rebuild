@@ -20,6 +20,42 @@ class DiceCog(commands.Cog):
         self.bot.config.default("dice_channel", [])
         self.bot.config.default("dice_limit", 0)
         self.bot.config.default("dice_count_limit", 0)
+
+    @staticmethod
+    def format_result(
+        values: np.ndarray,
+        dice_count: int,
+        dice_sides: int,
+        target: int | None,
+        success: bool | None,
+        elapsed: str,
+        result_limit: int
+    ) -> tuple[str, bool]:
+        total = np.sum(values)
+        header = f"**{dice_count}d{dice_sides}{f' {target}' if target is not None else ''}**\n-->"
+        suffix = f"-->合計{total}"
+        status = f"{'-->成功' if success else '-->失敗'}" if success is not None else ""
+        displayed: list[str] = []
+        omitted = False
+
+        for index, value in enumerate(map(str, values)):
+            remaining = index < len(values) - 1
+            candidate = ",".join(displayed + [value])
+            candidate_array = f"{candidate},..." if remaining else candidate
+            candidate_message = f"{header}{candidate_array}{suffix}{status}{elapsed}"
+            if (
+                len(candidate_array) > result_limit
+                or len(candidate_message) > 4096
+            ):
+                omitted = True
+                break
+            displayed.append(value)
+
+        result = ",".join(displayed)
+        if omitted:
+            result = f"{result},..." if result else "..."
+        return f"{header}{result}{suffix}{status}{elapsed}", omitted
+
     @commands.Cog.listener()
     async def on_ready(self):
         self.log.info(f"{self.__class__.__name__}が読み込まれました！")
@@ -63,8 +99,6 @@ class DiceCog(commands.Cog):
                         return
                 r = rd.randint(low=1, high=dice_sides + 1, size=dice_count)
                 sum = np.sum(r)
-                dice_count_limit = self.bot.config.get("dice_count_limit", 100)
-
                 if target is not None:
                     if target >= sum:
                         suc = True
@@ -76,11 +110,19 @@ class DiceCog(commands.Cog):
                     suc = None
                     colour = discord.Colour.brand_green()
 
+                dice_count_limit = self.bot.config.get("dice_count_limit", 100)
                 if not isinstance(dice_count_limit, int) or dice_count_limit <= 0:
                     dice_count_limit = 100
-                rl = ",".join(map(str, r[:dice_count_limit]))
                 a_t = time.time()
-                mes = f"**{dice_count}d{dice_sides}{f' {target}' if target is not None else ''}**\n-->{f'{rl}{",..." if len(r) > dice_count_limit else ""}-->合計{sum}' if dice_count != 1 else sum}{('-->成功' if suc else '-->失敗') if suc is not None else ''}\n\n計算時間: {a_t - b_t}ミリ秒"
+                mes, omitted = self.format_result(
+                    r,
+                    dice_count,
+                    dice_sides,
+                    target,
+                    suc,
+                    f"\n\n計算時間: {a_t - b_t}ミリ秒",
+                    dice_count_limit
+                )
                 embed = discord.Embed(
                     description=mes,
                     colour=colour
@@ -89,7 +131,7 @@ class DiceCog(commands.Cog):
                     name=message.author.display_name,
                     icon_url=message.author.display_avatar.url
                 )
-                if len(r) > dice_count_limit:
+                if omitted:
                     embed.set_footer(text="計算結果が長いため途中を省略しています。")
                 await message.reply(
                     embed=embed
@@ -232,9 +274,16 @@ class DiceCog(commands.Cog):
         
         if not isinstance(dice_count_limit, int) or dice_count_limit <= 0:
             dice_count_limit = 100
-        rl = ",".join(map(str, r[:dice_count_limit]))
         a_t = time.time()
-        mes = f"**{dice_count}d{dice_sides}{f' {target}' if target is not None else ''}**\n-->{f'{rl}{",..." if len(r) > dice_count_limit else ""}-->合計{sum}' if dice_count != 1 else sum}{('-->成功' if suc else '-->失敗') if suc is not None else ''}\n\n計算時間: {a_t - b_t}ミリ秒"
+        mes, omitted = self.format_result(
+            r,
+            dice_count,
+            dice_sides,
+            target,
+            suc,
+            f"\n\n計算時間: {a_t - b_t}ミリ秒",
+            dice_count_limit
+        )
         embed = discord.Embed(
             description=mes,
             colour=colour
@@ -243,7 +292,7 @@ class DiceCog(commands.Cog):
             name=interaction.user.display_name,
             icon_url=interaction.user.display_avatar.url
         )
-        if len(r) > dice_count_limit:
+        if omitted:
             embed.set_footer(text="計算結果が長いため途中を省略しています。")
         await interaction.followup.send(
             embed=embed
